@@ -1,0 +1,88 @@
+name: Update Download Count
+
+on:
+  workflow_dispatch:
+
+  release:
+    types:
+      - published
+
+  schedule:
+    - cron: "15 8 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update-download-count:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Calculate installer downloads
+        id: downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          REPO="${{ github.repository }}"
+          ASSET_NAME="RDL-Console-3-Setup.exe"
+
+          echo "Reading releases from $REPO"
+
+          TOTAL=$(
+            gh api --paginate "repos/$REPO/releases?per_page=100" \
+              --jq ".[] | .assets[] | select(.name == \"$ASSET_NAME\") | .download_count" \
+            | awk '{ total += $1 } END { print total + 0 }'
+          )
+
+          echo "Total installer downloads: $TOTAL"
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+
+      - name: Update README
+        shell: python
+        env:
+          DOWNLOAD_TOTAL: ${{ steps.downloads.outputs.total }}
+        run: |
+          import os
+          import re
+          from pathlib import Path
+
+          readme = Path("README.md")
+          text = readme.read_text(encoding="utf-8")
+
+          total = os.environ["DOWNLOAD_TOTAL"]
+
+          start = "<!-- DOWNLOAD_COUNT_START -->"
+          end = "<!-- DOWNLOAD_COUNT_END -->"
+
+          pattern = re.escape(start) + r".*?" + re.escape(end)
+          replacement = f"{start}{total}{end}"
+
+          updated, count = re.subn(pattern, replacement, text)
+
+          if count != 1:
+              raise RuntimeError(
+                  f"Expected exactly one download-count marker pair, found {count}"
+              )
+
+          readme.write_text(updated, encoding="utf-8")
+
+          print(f"README updated with {total} downloads.")
+
+      - name: Commit updated count
+        shell: bash
+        run: |
+          if git diff --quiet README.md; then
+            echo "Download count has not changed."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add README.md
+          git commit -m "Update installer download count"
+          git push
