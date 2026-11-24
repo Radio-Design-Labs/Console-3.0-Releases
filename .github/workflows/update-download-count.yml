@@ -13,6 +13,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: update-download-count
+  cancel-in-progress: false
+
 jobs:
   update-download-count:
     runs-on: ubuntu-latest
@@ -20,6 +24,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Calculate installer downloads
         id: downloads
@@ -27,23 +33,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          REPO="${{ github.repository }}"
-          ASSET_NAME="RDL-Console-3-Setup.exe"
+          set -euo pipefail
 
-          echo "Reading releases from $REPO"
+          WINDOWS_REPO="Radio-Design-Labs/Console-3.0-Releases"
+          MACOS_REPO="Radio-Design-Labs/Console-3.0-macOS-Releases"
 
-          TOTAL=$(
-            gh api --paginate "repos/$REPO/releases?per_page=100" \
-              --jq ".[] | .assets[] | select(.name == \"$ASSET_NAME\") | .download_count" \
-            | awk '{ total += $1 } END { print total + 0 }'
-          )
+          WINDOWS_ASSET="RDL-Console-3-Setup.exe"
+          MACOS_ASSET="RDL-Console-3-Setup.dmg"
 
-          echo "Total installer downloads: $TOTAL"
-          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+          count_downloads() {
+            local repo="$1"
+            local asset="$2"
+
+            gh api --paginate "repos/$repo/releases?per_page=100" \
+              --jq ".[] | select(.draft == false) | .assets[] | select(.name == \"$asset\") | .download_count" \
+              | awk '{ total += $1 } END { print total + 0 }'
+          }
+
+          echo "Reading Windows releases..."
+          WINDOWS_TOTAL=$(count_downloads "$WINDOWS_REPO" "$WINDOWS_ASSET")
+
+          echo "Reading macOS releases..."
+          MACOS_TOTAL=$(count_downloads "$MACOS_REPO" "$MACOS_ASSET")
+
+          COMBINED_TOTAL=$((WINDOWS_TOTAL + MACOS_TOTAL))
+
+          echo "Windows installer downloads: $WINDOWS_TOTAL"
+          echo "macOS installer downloads: $MACOS_TOTAL"
+          echo "Combined installer downloads: $COMBINED_TOTAL"
+
+          echo "windows=$WINDOWS_TOTAL" >> "$GITHUB_OUTPUT"
+          echo "macos=$MACOS_TOTAL" >> "$GITHUB_OUTPUT"
+          echo "total=$COMBINED_TOTAL" >> "$GITHUB_OUTPUT"
 
       - name: Update README
         shell: python
         env:
+          WINDOWS_TOTAL: ${{ steps.downloads.outputs.windows }}
+          MACOS_TOTAL: ${{ steps.downloads.outputs.macos }}
           DOWNLOAD_TOTAL: ${{ steps.downloads.outputs.total }}
         run: |
           import os
@@ -53,30 +80,44 @@ jobs:
           readme = Path("README.md")
           text = readme.read_text(encoding="utf-8")
 
-          total = os.environ["DOWNLOAD_TOTAL"]
+          counts = {
+              "WINDOWS_DOWNLOAD_COUNT": os.environ["WINDOWS_TOTAL"],
+              "MACOS_DOWNLOAD_COUNT": os.environ["MACOS_TOTAL"],
+              "DOWNLOAD_COUNT": os.environ["DOWNLOAD_TOTAL"],
+          }
 
-          start = "<!-- DOWNLOAD_COUNT_START -->"
-          end = "<!-- DOWNLOAD_COUNT_END -->"
+          for marker, total in counts.items():
+              start = f"<!-- {marker}_START -->"
+              end = f"<!-- {marker}_END -->"
 
-          pattern = re.escape(start) + r".*?" + re.escape(end)
-          replacement = f"{start}{total}{end}"
+              pattern = re.escape(start) + r".*?" + re.escape(end)
+              replacement = f"{start}{total}{end}"
 
-          updated, count = re.subn(pattern, replacement, text)
-
-          if count != 1:
-              raise RuntimeError(
-                  f"Expected exactly one download-count marker pair, found {count}"
+              text, count = re.subn(
+                  pattern,
+                  replacement,
+                  text,
+                  flags=re.DOTALL
               )
 
-          readme.write_text(updated, encoding="utf-8")
+              if count != 1:
+                  raise RuntimeError(
+                      f"Expected exactly one {marker} marker pair, found {count}"
+                  )
 
-          print(f"README updated with {total} downloads.")
+              print(f"{marker}: {total}")
+
+          readme.write_text(text, encoding="utf-8")
+
+          print("README download statistics updated.")
 
       - name: Commit updated count
         shell: bash
         run: |
+          set -euo pipefail
+
           if git diff --quiet README.md; then
-            echo "Download count has not changed."
+            echo "Download counts have not changed."
             exit 0
           fi
 
@@ -84,5 +125,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add README.md
-          git commit -m "Update installer download count"
-          git push
+          git commit -m "Update installer download statistics"
+          git push origin main
