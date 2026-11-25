@@ -10,9 +10,9 @@ Download the latest version of RDL Console 3 from the RDL website.
 
 | Platform | Total Installer Downloads |
 |----------|--------------------------:|
-| Windows | <!-- WINDOWS_DOWNLOAD_COUNT_START -->817<!-- WINDOWS_DOWNLOAD_COUNT_END --> |
+| Windows | <!-- WINDOWS_DOWNLOAD_COUNT_START -->825<!-- WINDOWS_DOWNLOAD_COUNT_END --> |
 | macOS | <!-- MACOS_DOWNLOAD_COUNT_START -->0<!-- MACOS_DOWNLOAD_COUNT_END --> |
-| **Combined** | **<!-- DOWNLOAD_COUNT_START -->817<!-- DOWNLOAD_COUNT_END -->** |
+| **Combined** | **<!-- DOWNLOAD_COUNT_START -->825<!-- DOWNLOAD_COUNT_END -->** |
 
 Download statistics are automatically updated daily.
 
